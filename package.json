@@ -1,0 +1,70 @@
+{
+  "name": "@hovecapital/read-only-postgres-mcp-server",
+  "mcpName": "capital.hove/read-only-local-postgres-mcp-server",
+  "version": "0.1.0",
+  "type": "commonjs",
+  "description": "A Model Context Protocol (MCP) server that enables Claude Desktop to interact with PostgreSQL databases through read-only queries",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "read-only-postgres-mcp-server": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "node dist/index.js",
+    "start": "node dist/index.js",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
+    "format": "prettier --write \"src/**/*.{ts,json,md}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,json,md}\"",
+    "type-check": "tsc --noEmit",
+    "validate": "npm run type-check && npm run lint && npm run format:check",
+    "prepublishOnly": "npm run validate && npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "postgresql",
+    "postgres",
+    "database",
+    "claude",
+    "claude-desktop",
+    "ai",
+    "read-only"
+  ],
+  "author": "Hove Capital",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hovecapital/read-only-local-postgres-mcp-server.git"
+  },
+  "bugs": {
+    "url": "https://github.com/hovecapital/read-only-local-postgres-mcp-server/issues"
+  },
+  "homepage": "https://github.com/hovecapital/read-only-local-postgres-mcp-server#readme",
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.8.0",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.9",
+    "@types/pg": "^8.11.10",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "eslint": "^8.57.1",
+    "eslint-config-prettier": "^9.1.2",
+    "prettier": "^3.6.2",
+    "typescript": "^5.8.3"
+  }
+}
