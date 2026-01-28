@@ -7,11 +7,12 @@ A Model Context Protocol (MCP) server that enables Claude Desktop to interact wi
 
 ## Features
 
-- Execute read-only SQL queries through Claude Desktop
+- Execute read-only SQL queries through Claude Desktop or Claude Code
+- **Dynamic database connections** - connect to any PostgreSQL database at runtime
 - Built-in security with query validation (only SELECT statements allowed)
-- Easy integration with Claude Desktop
+- Easy integration with Claude Desktop and Claude Code
 - JSON formatted query results
-- Environment-based configuration for database credentials
+- Environment-based default configuration with runtime override support
 
 ## Quick Start
 
@@ -214,7 +215,7 @@ If you're using Claude Code with a manual installation, add the PostgreSQL serve
 }
 ```
 
-3. Restart Claude Code for the changes to take effect.
+1. Restart Claude Code for the changes to take effect.
 
 ### Claude Desktop Configuration
 
@@ -265,20 +266,176 @@ If you're using [mise](https://mise.jdx.dev/) for Node.js version management, ma
 | `DB_DATABASE` | Database name | `postgres` |
 | `DB_USERNAME` | PostgreSQL username | `postgres` |
 | `DB_PASSWORD` | PostgreSQL password | (empty) |
+| `DB_SSL` | Enable SSL connection | `false` |
+
+## Tools
+
+This MCP server exposes three tools that Claude can use to interact with PostgreSQL databases.
+
+### `connect`
+
+Connect to a PostgreSQL database using a connection string. The connection persists for subsequent queries until changed or disconnected.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `connectionString` | string | Yes | PostgreSQL connection string |
+
+**Connection String Format:**
+
+```
+postgres://username:password@host:port/database?sslmode=require
+postgresql://username:password@host:port/database
+```
+
+**SSL Modes Supported:**
+
+- `sslmode=require` - Require SSL (recommended for remote connections)
+- `sslmode=verify-full` - Require SSL with certificate verification
+- No sslmode parameter - No SSL (for local connections)
+
+**Example Usage (natural language):**
+
+```
+"Connect to postgres://myuser:mypass@db.example.com:5432/production"
+"Connect to this database: postgres://admin:secret@localhost/analytics"
+```
+
+**Response:**
+
+```json
+{
+  "status": "connected",
+  "host": "db.example.com",
+  "port": 5432,
+  "database": "production",
+  "user": "myuser",
+  "ssl": true
+}
+```
+
+---
+
+### `disconnect`
+
+Disconnect from the current runtime database and revert to the default environment-configured connection.
+
+**Parameters:** None
+
+**Example Usage (natural language):**
+
+```
+"Disconnect from the current database"
+"Go back to the default database"
+```
+
+**Response:**
+
+```json
+{
+  "status": "disconnected",
+  "message": "Reverted to default environment connection",
+  "host": "localhost",
+  "database": "postgres"
+}
+```
+
+---
+
+### `query`
+
+Run a read-only SQL query against the currently connected database. Optionally override the connection for a single query.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `sql` | string | Yes | SQL query to execute (SELECT only) |
+| `connectionString` | string | No | Override connection for this query only |
+
+**Example Usage (natural language):**
+
+```
+"Show me all tables in the database"
+"SELECT * FROM users LIMIT 10"
+"Run this query on postgres://other:pass@host/db: SELECT count(*) FROM orders"
+```
+
+**Response:**
+
+```json
+[
+  { "id": 1, "name": "Alice", "email": "alice@example.com" },
+  { "id": 2, "name": "Bob", "email": "bob@example.com" }
+]
+```
+
+---
+
+### Tool Reference for LLMs
+
+When using this MCP server, Claude can:
+
+1. **Query the default database** (configured via environment variables):
+
+   ```
+   User: "What tables are in my database?"
+   Claude: [Uses query tool with SQL: "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"]
+   ```
+
+2. **Connect to a different database dynamically**:
+
+   ```
+   User: "Connect to postgres://user:pass@newhost/newdb and show me the users table"
+   Claude: [Uses connect tool first, then query tool]
+   ```
+
+3. **One-off query to a different database** (without switching active connection):
+
+   ```
+   User: "How many records are in the orders table on postgres://user:pass@analytics/warehouse?"
+   Claude: [Uses query tool with connectionString parameter]
+   ```
+
+4. **Revert to default connection**:
+
+   ```
+   User: "Go back to my local database"
+   Claude: [Uses disconnect tool]
+   ```
 
 ## Usage
 
-1. **Restart Claude Desktop** after updating the configuration
+1. **Restart Claude Desktop/Code** after updating the configuration
 2. **Start chatting** with Claude about your database
 
 ### Example Queries
 
-```bash
+**Basic queries (uses default/active connection):**
+
+```
 "Show me all tables in my database"
 "What's the structure of the users table?"
 "Get the first 10 records from the products table"
 "How many orders were placed last month?"
 "Show me users with email addresses ending in @gmail.com"
+```
+
+**Dynamic connection examples:**
+
+```
+"Connect to postgres://analyst:password@analytics.example.com:5432/warehouse"
+"Now show me all the tables"
+"What's the total revenue in the sales table?"
+"Disconnect and go back to my local database"
+```
+
+**One-off queries to different databases:**
+
+```
+"Run SELECT count(*) FROM users on postgres://admin:secret@prod.example.com/app"
+"Check the orders table on my staging database: postgres://dev:dev@staging/app"
 ```
 
 Claude will automatically convert your natural language requests into appropriate SQL queries and execute them against your database.
@@ -287,7 +444,7 @@ Claude will automatically convert your natural language requests into appropriat
 
 ### Read-Only Operations
 
-The server only allows SELECT queries. The following operations are blocked:
+The server enforces read-only access on **all connections** (both environment-configured and runtime dynamic connections). The following operations are blocked:
 
 - `INSERT` - Adding new records
 - `UPDATE` - Modifying existing records
@@ -298,6 +455,15 @@ The server only allows SELECT queries. The following operations are blocked:
 - `TRUNCATE` - Removing all records from a table
 - `GRANT` - Modifying permissions
 - `REVOKE` - Removing permissions
+
+### Dynamic Connection Security
+
+When using the `connect` tool or `connectionString` parameter:
+
+- **Read-only enforcement still applies** - All queries are validated regardless of connection source
+- **Credentials are not logged** - Connection strings with passwords are never written to logs
+- **Sanitized responses** - The `connect` tool response excludes passwords
+- **Session-based** - Runtime connections only persist for the current MCP session
 
 ### Recommended Database Setup
 
