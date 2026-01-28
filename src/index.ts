@@ -17,6 +17,7 @@ const DB_PORT: string = process.env.DB_PORT ?? "5432";
 const DB_DATABASE: string = process.env.DB_DATABASE ?? "postgres";
 const DB_USERNAME: string = process.env.DB_USERNAME ?? "postgres";
 const DB_PASSWORD: string = process.env.DB_PASSWORD ?? "";
+const DB_SSL: string = process.env.DB_SSL ?? "false";
 
 type QueryToolArguments = {
   sql: string;
@@ -28,6 +29,7 @@ type DatabaseConfig = {
   user: string;
   password: string;
   database: string;
+  ssl?: { rejectUnauthorized: boolean } | boolean;
 };
 
 class PostgreSQLServer {
@@ -63,6 +65,7 @@ class PostgreSQLServer {
         user: DB_USERNAME,
         password: DB_PASSWORD,
         database: DB_DATABASE,
+        ssl: DB_SSL === "true" ? { rejectUnauthorized: false } : false,
       };
       const client = new Client(config);
       await client.connect();
