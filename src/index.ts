@@ -19,7 +19,7 @@ const DB_USERNAME: string = process.env.DB_USERNAME ?? "postgres";
 const DB_PASSWORD: string = process.env.DB_PASSWORD ?? "";
 const DB_SSL: string = process.env.DB_SSL ?? "false";
 
-type ConnectionSource = 'environment' | 'runtime';
+type ConnectionSource = "environment" | "runtime";
 
 type DatabaseConfig = {
   host: string;
@@ -52,21 +52,24 @@ type ToolResult = {
 function parseConnectionString(connectionString: string): DatabaseConfig {
   const url = new URL(connectionString);
 
-  if (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') {
-    throw new Error('Invalid connection string: must start with postgres:// or postgresql://');
+  if (url.protocol !== "postgres:" && url.protocol !== "postgresql:") {
+    throw new Error(
+      "Invalid connection string: must start with postgres:// or postgresql://"
+    );
   }
 
-  const sslMode = url.searchParams.get('sslmode');
-  const ssl = sslMode === 'require' || sslMode === 'verify-full'
-    ? { rejectUnauthorized: sslMode === 'verify-full' }
-    : false;
+  const sslMode = url.searchParams.get("sslmode");
+  const ssl =
+    sslMode === "require" || sslMode === "verify-full"
+      ? { rejectUnauthorized: sslMode === "verify-full" }
+      : false;
 
   return {
-    host: url.hostname || 'localhost',
+    host: url.hostname || "localhost",
     port: parseInt(url.port, 10) || 5432,
-    user: decodeURIComponent(url.username) || 'postgres',
-    password: decodeURIComponent(url.password) || '',
-    database: url.pathname.slice(1) || 'postgres',
+    user: decodeURIComponent(url.username) || "postgres",
+    password: decodeURIComponent(url.password) || "",
+    database: url.pathname.slice(1) || "postgres",
     ssl,
   };
 }
@@ -84,9 +87,9 @@ class PostgreSQLServer {
         user: DB_USERNAME,
         password: DB_PASSWORD,
         database: DB_DATABASE,
-        ssl: DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+        ssl: DB_SSL === "true" ? { rejectUnauthorized: false } : false,
       },
-      source: 'environment',
+      source: "environment",
     };
     this.activeConnection = this.defaultConnection;
 
@@ -111,7 +114,9 @@ class PostgreSQLServer {
     });
   }
 
-  private async createClient(configOverride?: DatabaseConfig): Promise<typeof Client.prototype> {
+  private async createClient(
+    configOverride?: DatabaseConfig
+  ): Promise<typeof Client.prototype> {
     try {
       const config = configOverride ?? this.activeConnection.config;
       const client = new Client(config);
@@ -131,13 +136,15 @@ class PostgreSQLServer {
       tools: [
         {
           name: "connect",
-          description: "Connect to a PostgreSQL database using a connection string. The connection will be used for subsequent queries until changed.",
+          description:
+            "Connect to a PostgreSQL database using a connection string. The connection will be used for subsequent queries until changed.",
           inputSchema: {
             type: "object",
             properties: {
               connectionString: {
                 type: "string",
-                description: "PostgreSQL connection string (e.g., postgres://user:password@host:5432/database?sslmode=require)",
+                description:
+                  "PostgreSQL connection string (e.g., postgres://user:password@host:5432/database?sslmode=require)",
               },
             },
             required: ["connectionString"],
@@ -145,7 +152,8 @@ class PostgreSQLServer {
         },
         {
           name: "disconnect",
-          description: "Disconnect from the current runtime database and revert to the default environment-configured connection",
+          description:
+            "Disconnect from the current runtime database and revert to the default environment-configured connection",
           inputSchema: {
             type: "object",
             properties: {},
@@ -154,7 +162,8 @@ class PostgreSQLServer {
         },
         {
           name: "query",
-          description: "Run a read-only SQL query against the currently connected database",
+          description:
+            "Run a read-only SQL query against the currently connected database",
           inputSchema: {
             type: "object",
             properties: {
@@ -164,7 +173,8 @@ class PostgreSQLServer {
               },
               connectionString: {
                 type: "string",
-                description: "Optional: PostgreSQL connection string to override the current connection for this query only",
+                description:
+                  "Optional: PostgreSQL connection string to override the current connection for this query only",
               },
             },
             required: ["sql"],
@@ -177,7 +187,9 @@ class PostgreSQLServer {
       const toolName = request.params.name;
 
       if (toolName === "connect") {
-        return this.handleConnect(request.params.arguments as ConnectToolArguments);
+        return this.handleConnect(
+          request.params.arguments as ConnectToolArguments
+        );
       }
 
       if (toolName === "disconnect") {
@@ -188,10 +200,7 @@ class PostgreSQLServer {
         return this.handleQuery(request.params.arguments as QueryToolArguments);
       }
 
-      throw new McpError(
-        ErrorCode.MethodNotFound,
-        `Unknown tool: ${toolName}`
-      );
+      throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${toolName}`);
     });
   }
 
@@ -209,21 +218,25 @@ class PostgreSQLServer {
       // Store as active connection
       this.activeConnection = {
         config,
-        source: 'runtime',
+        source: "runtime",
       };
 
       return {
         content: [
           {
             type: "text",
-            text: JSON.stringify({
-              status: "connected",
-              host: config.host,
-              port: config.port,
-              database: config.database,
-              user: config.user,
-              ssl: config.ssl !== false,
-            }, null, 2),
+            text: JSON.stringify(
+              {
+                status: "connected",
+                host: config.host,
+                port: config.port,
+                database: config.database,
+                user: config.user,
+                ssl: config.ssl !== false,
+              },
+              null,
+              2
+            ),
           },
         ],
       };
@@ -247,12 +260,16 @@ class PostgreSQLServer {
       content: [
         {
           type: "text",
-          text: JSON.stringify({
-            status: "disconnected",
-            message: "Reverted to default environment connection",
-            host: this.defaultConnection.config.host,
-            database: this.defaultConnection.config.database,
-          }, null, 2),
+          text: JSON.stringify(
+            {
+              status: "disconnected",
+              message: "Reverted to default environment connection",
+              host: this.defaultConnection.config.host,
+              database: this.defaultConnection.config.database,
+            },
+            null,
+            2
+          ),
         },
       ],
     };
@@ -275,7 +292,9 @@ class PostgreSQLServer {
 
     let client: typeof Client.prototype | undefined;
     try {
-      const config = connectionString ? parseConnectionString(connectionString) : undefined;
+      const config = connectionString
+        ? parseConnectionString(connectionString)
+        : undefined;
       client = await this.createClient(config);
       const result: QueryResult = await client.query(sql);
 
