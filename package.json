@@ -1,7 +1,7 @@
 {
   "name": "@hovecapital/read-only-postgres-mcp-server",
   "mcpName": "capital.hove/read-only-local-postgres-mcp-server",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "commonjs",
   "description": "A Model Context Protocol (MCP) server that enables Claude Desktop to interact with PostgreSQL databases through read-only queries",
   "main": "dist/index.js",
