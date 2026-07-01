@@ -74,6 +74,127 @@ function parseConnectionString(connectionString: string): DatabaseConfig {
   };
 }
 
+// Statement keywords that mutate data, schema, permissions, session state,
+// or otherwise have side effects. A query is rejected if it begins with any
+// of these. Only read verbs (SELECT, WITH, EXPLAIN, SHOW, TABLE, VALUES) pass.
+const WRITE_OPERATIONS = [
+  // Data manipulation
+  "insert",
+  "update",
+  "delete",
+  "truncate",
+  "copy",
+  "merge",
+  // Schema / DDL
+  "drop",
+  "alter",
+  "create",
+  "comment",
+  "rename",
+  "reassign",
+  // Permissions
+  "grant",
+  "revoke",
+  "security",
+  // Session / config mutation
+  "set",
+  "reset",
+  "discard",
+  "load",
+  // Procedures / dynamic execution
+  "call",
+  "do",
+  "execute",
+  "prepare",
+  "deallocate",
+  // Cursors
+  "declare",
+  "fetch",
+  "move",
+  "close",
+  // Transaction control
+  "begin",
+  "start",
+  "commit",
+  "rollback",
+  "savepoint",
+  "release",
+  "lock",
+  // Maintenance (all write to catalogs / relations)
+  "vacuum",
+  "analyze",
+  "reindex",
+  "cluster",
+  "refresh",
+  "checkpoint",
+  // Async notification
+  "notify",
+  "listen",
+  "unlisten",
+] as const;
+
+// Whether an EXPLAIN options string enables ANALYZE (e.g. "analyze, buffers"
+// or "format json, analyze true"). ANALYZE explicitly disabled counts as off.
+function isAnalyzeOptionEnabled(options: string): boolean {
+  const match = options.match(/\banaly[sz]e\b\s*([a-z0-9]+)?/);
+  if (!match) {
+    return false;
+  }
+  const value = match[1];
+  return !(value !== undefined && ["false", "off", "0", "no"].includes(value));
+}
+
+// Returns the inner statement of an EXPLAIN that will actually be executed
+// (i.e. EXPLAIN ANALYZE ...), so it can be validated on its own. Returns null
+// for non-EXPLAIN queries and for plain EXPLAIN / ANALYZE-disabled EXPLAIN,
+// neither of which executes the underlying statement. Input must be lowercased
+// and trimmed.
+function getExecutedExplainTarget(normalizedSql: string): string | null {
+  if (!/^explain[\s(]/.test(normalizedSql)) {
+    return null;
+  }
+
+  let rest = normalizedSql.slice("explain".length).trimStart();
+  let analyzeEnabled = false;
+
+  if (rest.startsWith("(")) {
+    // Parenthesized options: EXPLAIN (ANALYZE, BUFFERS) <statement>
+    let depth = 0;
+    let end = -1;
+    for (let i = 0; i < rest.length; i++) {
+      const char = rest[i];
+      if (char === "(") {
+        depth += 1;
+      } else if (char === ")") {
+        depth -= 1;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    if (end === -1) {
+      return null; // Unbalanced parentheses; let the denylist handle it.
+    }
+    analyzeEnabled = isAnalyzeOptionEnabled(rest.slice(1, end));
+    rest = rest.slice(end + 1).trimStart();
+  } else {
+    // Legacy options: EXPLAIN [ANALYZE] [VERBOSE] <statement>
+    let match: RegExpMatchArray | null = rest.match(
+      /^(analyze|analyse|verbose)\b\s*/
+    );
+    while (match !== null) {
+      if (match[1] !== "verbose") {
+        analyzeEnabled = true;
+      }
+      rest = rest.slice(match[0].length);
+      match = rest.match(/^(analyze|analyse|verbose)\b\s*/);
+    }
+  }
+
+  return analyzeEnabled ? rest : null;
+}
+
 class PostgreSQLServer {
   private server: Server;
   private activeConnection: ActiveConnection;
@@ -325,63 +446,16 @@ class PostgreSQLServer {
 
   private isReadOnlyQuery(sql: string): boolean {
     const normalizedSql = sql.trim().toLowerCase();
-    const writeOperations = [
-      // Data manipulation
-      "insert",
-      "update",
-      "delete",
-      "truncate",
-      "copy",
-      "merge",
-      // Schema / DDL
-      "drop",
-      "alter",
-      "create",
-      "comment",
-      "rename",
-      "reassign",
-      // Permissions
-      "grant",
-      "revoke",
-      "security",
-      // Session / config mutation
-      "set",
-      "reset",
-      "discard",
-      "load",
-      // Procedures / dynamic execution
-      "call",
-      "do",
-      "execute",
-      "prepare",
-      "deallocate",
-      // Cursors
-      "declare",
-      "fetch",
-      "move",
-      "close",
-      // Transaction control
-      "begin",
-      "start",
-      "commit",
-      "rollback",
-      "savepoint",
-      "release",
-      "lock",
-      // Maintenance (all write to catalogs / relations)
-      "vacuum",
-      "analyze",
-      "reindex",
-      "cluster",
-      "refresh",
-      "checkpoint",
-      // Async notification
-      "notify",
-      "listen",
-      "unlisten",
-    ] as const;
 
-    return !writeOperations.some((op) => normalizedSql.startsWith(op));
+    // `EXPLAIN ANALYZE` actually executes the underlying statement, so a
+    // bare prefix check would let `EXPLAIN ANALYZE DELETE ...` through.
+    // Validate the executed inner statement instead of the wrapper.
+    const executedTarget = getExecutedExplainTarget(normalizedSql);
+    if (executedTarget !== null) {
+      return this.isReadOnlyQuery(executedTarget);
+    }
+
+    return !WRITE_OPERATIONS.some((op) => normalizedSql.startsWith(op));
   }
 
   async run(): Promise<void> {

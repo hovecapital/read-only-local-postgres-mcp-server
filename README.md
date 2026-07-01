@@ -456,7 +456,7 @@ The server enforces read-only access on **all connections** (both environment-co
 - **Maintenance** - `VACUUM`, `ANALYZE`, `REINDEX`, `CLUSTER`, `REFRESH`, `CHECKPOINT`
 - **Async notification** - `NOTIFY`, `LISTEN`, `UNLISTEN`
 
-Only statements beginning with read verbs (e.g. `SELECT`, `WITH`, `EXPLAIN`, `SHOW`, `TABLE`, `VALUES`) are allowed through.
+Only statements beginning with read verbs (e.g. `SELECT`, `WITH`, `EXPLAIN`, `SHOW`, `TABLE`, `VALUES`) are allowed through. Because `EXPLAIN ANALYZE` executes the statement it wraps, its inner statement is validated too — `EXPLAIN ANALYZE DELETE ...` is rejected, while `EXPLAIN ANALYZE SELECT ...` is allowed.
 
 ### Dynamic Connection Security
 
