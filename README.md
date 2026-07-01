@@ -444,17 +444,19 @@ Claude will automatically convert your natural language requests into appropriat
 
 ### Read-Only Operations
 
-The server enforces read-only access on **all connections** (both environment-configured and runtime dynamic connections). The following operations are blocked:
+The server enforces read-only access on **all connections** (both environment-configured and runtime dynamic connections). A query is rejected if it begins with any of the following statement keywords:
 
-- `INSERT` - Adding new records
-- `UPDATE` - Modifying existing records
-- `DELETE` - Removing records
-- `DROP` - Removing tables/databases
-- `ALTER` - Modifying table structure
-- `CREATE` - Creating new tables/databases
-- `TRUNCATE` - Removing all records from a table
-- `GRANT` - Modifying permissions
-- `REVOKE` - Removing permissions
+- **Data manipulation** - `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE`, `COPY`, `MERGE`
+- **Schema / DDL** - `CREATE`, `ALTER`, `DROP`, `COMMENT`, `RENAME`, `REASSIGN`
+- **Permissions** - `GRANT`, `REVOKE`, `SECURITY`
+- **Session / config** - `SET`, `RESET`, `DISCARD`, `LOAD`
+- **Procedures / dynamic execution** - `CALL`, `DO`, `EXECUTE`, `PREPARE`, `DEALLOCATE`
+- **Cursors** - `DECLARE`, `FETCH`, `MOVE`, `CLOSE`
+- **Transaction control** - `BEGIN`, `START`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`, `RELEASE`, `LOCK`
+- **Maintenance** - `VACUUM`, `ANALYZE`, `REINDEX`, `CLUSTER`, `REFRESH`, `CHECKPOINT`
+- **Async notification** - `NOTIFY`, `LISTEN`, `UNLISTEN`
+
+Only statements beginning with read verbs (e.g. `SELECT`, `WITH`, `EXPLAIN`, `SHOW`, `TABLE`, `VALUES`) are allowed through. Because `EXPLAIN ANALYZE` executes the statement it wraps, its inner statement is validated too — `EXPLAIN ANALYZE DELETE ...` is rejected, while `EXPLAIN ANALYZE SELECT ...` is allowed.
 
 ### Dynamic Connection Security
 
