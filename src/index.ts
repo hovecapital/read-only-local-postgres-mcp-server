@@ -137,7 +137,7 @@ class PostgreSQLServer {
         {
           name: "connect",
           description:
-            "Connect to a PostgreSQL database using a connection string. The connection will be used for subsequent queries until changed.",
+            "Connect to a PostgreSQL database using a connection string. The connection persists for subsequent queries until changed or disconnected.",
           inputSchema: {
             type: "object",
             properties: {
@@ -326,18 +326,59 @@ class PostgreSQLServer {
   private isReadOnlyQuery(sql: string): boolean {
     const normalizedSql = sql.trim().toLowerCase();
     const writeOperations = [
+      // Data manipulation
       "insert",
       "update",
       "delete",
+      "truncate",
+      "copy",
+      "merge",
+      // Schema / DDL
       "drop",
       "alter",
       "create",
-      "truncate",
+      "comment",
+      "rename",
+      "reassign",
+      // Permissions
       "grant",
       "revoke",
-      "copy",
-      "merge",
+      "security",
+      // Session / config mutation
       "set",
+      "reset",
+      "discard",
+      "load",
+      // Procedures / dynamic execution
+      "call",
+      "do",
+      "execute",
+      "prepare",
+      "deallocate",
+      // Cursors
+      "declare",
+      "fetch",
+      "move",
+      "close",
+      // Transaction control
+      "begin",
+      "start",
+      "commit",
+      "rollback",
+      "savepoint",
+      "release",
+      "lock",
+      // Maintenance (all write to catalogs / relations)
+      "vacuum",
+      "analyze",
+      "reindex",
+      "cluster",
+      "refresh",
+      "checkpoint",
+      // Async notification
+      "notify",
+      "listen",
+      "unlisten",
     ] as const;
 
     return !writeOperations.some((op) => normalizedSql.startsWith(op));
