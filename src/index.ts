@@ -335,6 +335,9 @@ class PostgreSQLServer {
       "truncate",
       "grant",
       "revoke",
+      "copy",
+      "merge",
+      "set",
     ] as const;
 
     return !writeOperations.some((op) => normalizedSql.startsWith(op));
