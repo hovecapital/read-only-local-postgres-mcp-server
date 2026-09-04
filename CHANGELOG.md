@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/hovecapital/read-only-local-postgres-mcp-server/compare/read-only-postgres-mcp-server-v0.4.0...read-only-postgres-mcp-server-v0.5.0) (2026-09-04)
+
+
+### Features
+
+* **read-only-postgres-mcp-server:** add host allowlist and function-side-effect validation ([5429027](https://github.com/hovecapital/read-only-local-postgres-mcp-server/commit/5429027a540deb7dbffd684787ed9138a28cc0fa))
+
 ## [0.4.0](https://github.com/hovecapital/read-only-local-postgres-mcp-server/compare/read-only-postgres-mcp-server-v0.3.0...read-only-postgres-mcp-server-v0.4.0) (2026-07-01)
 
 
