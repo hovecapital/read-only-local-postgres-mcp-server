@@ -10,7 +10,8 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import pkg from "pg";
 const { Client } = pkg;
-import type { QueryResult } from "pg";
+import type { QueryConfig, QueryResult } from "pg";
+import { isReadOnlyQuery } from "./readOnly.js";
 
 const DB_HOST: string = process.env.DB_HOST ?? "localhost";
 const DB_PORT: string = process.env.DB_PORT ?? "5432";
@@ -18,6 +19,16 @@ const DB_DATABASE: string = process.env.DB_DATABASE ?? "postgres";
 const DB_USERNAME: string = process.env.DB_USERNAME ?? "postgres";
 const DB_PASSWORD: string = process.env.DB_PASSWORD ?? "";
 const DB_SSL: string = process.env.DB_SSL ?? "false";
+const DB_ALLOWED_HOSTS: string = process.env.DB_ALLOWED_HOSTS ?? "";
+
+// host:port pairs that runtime connection strings may target. Anything else
+// is rejected before a socket is opened, so the `connect` tool and the
+// `connectionString` argument cannot be used to probe the network.
+const ALLOWED_HOSTS: ReadonlySet<string> = new Set(
+  [`${DB_HOST}:${DB_PORT}`, ...DB_ALLOWED_HOSTS.split(",")]
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => entry !== "")
+);
 
 type ConnectionSource = "environment" | "runtime";
 
@@ -49,6 +60,20 @@ type ToolResult = {
   isError?: boolean;
 };
 
+// `queryMode: "extended"` makes pg use the extended query protocol, which the
+// server restricts to exactly one statement, so `SELECT 1; DROP TABLE x` is
+// rejected by PostgreSQL itself. @types/pg does not declare the field yet.
+type ExtendedQueryConfig = QueryConfig & { queryMode: "extended" };
+
+function assertHostAllowed(config: DatabaseConfig): void {
+  const target = `${config.host}:${config.port}`.toLowerCase();
+  if (!ALLOWED_HOSTS.has(target)) {
+    throw new Error(
+      `Connection to ${target} is not permitted. Add it to DB_ALLOWED_HOSTS to allow it.`
+    );
+  }
+}
+
 function parseConnectionString(connectionString: string): DatabaseConfig {
   const url = new URL(connectionString);
 
@@ -64,7 +89,7 @@ function parseConnectionString(connectionString: string): DatabaseConfig {
       ? { rejectUnauthorized: sslMode === "verify-full" }
       : false;
 
-  return {
+  const config: DatabaseConfig = {
     host: url.hostname || "localhost",
     port: parseInt(url.port, 10) || 5432,
     user: decodeURIComponent(url.username) || "postgres",
@@ -72,127 +97,8 @@ function parseConnectionString(connectionString: string): DatabaseConfig {
     database: url.pathname.slice(1) || "postgres",
     ssl,
   };
-}
-
-// Statement keywords that mutate data, schema, permissions, session state,
-// or otherwise have side effects. A query is rejected if it begins with any
-// of these. Only read verbs (SELECT, WITH, EXPLAIN, SHOW, TABLE, VALUES) pass.
-const WRITE_OPERATIONS = [
-  // Data manipulation
-  "insert",
-  "update",
-  "delete",
-  "truncate",
-  "copy",
-  "merge",
-  // Schema / DDL
-  "drop",
-  "alter",
-  "create",
-  "comment",
-  "rename",
-  "reassign",
-  // Permissions
-  "grant",
-  "revoke",
-  "security",
-  // Session / config mutation
-  "set",
-  "reset",
-  "discard",
-  "load",
-  // Procedures / dynamic execution
-  "call",
-  "do",
-  "execute",
-  "prepare",
-  "deallocate",
-  // Cursors
-  "declare",
-  "fetch",
-  "move",
-  "close",
-  // Transaction control
-  "begin",
-  "start",
-  "commit",
-  "rollback",
-  "savepoint",
-  "release",
-  "lock",
-  // Maintenance (all write to catalogs / relations)
-  "vacuum",
-  "analyze",
-  "reindex",
-  "cluster",
-  "refresh",
-  "checkpoint",
-  // Async notification
-  "notify",
-  "listen",
-  "unlisten",
-] as const;
-
-// Whether an EXPLAIN options string enables ANALYZE (e.g. "analyze, buffers"
-// or "format json, analyze true"). ANALYZE explicitly disabled counts as off.
-function isAnalyzeOptionEnabled(options: string): boolean {
-  const match = options.match(/\banaly[sz]e\b\s*([a-z0-9]+)?/);
-  if (!match) {
-    return false;
-  }
-  const value = match[1];
-  return !(value !== undefined && ["false", "off", "0", "no"].includes(value));
-}
-
-// Returns the inner statement of an EXPLAIN that will actually be executed
-// (i.e. EXPLAIN ANALYZE ...), so it can be validated on its own. Returns null
-// for non-EXPLAIN queries and for plain EXPLAIN / ANALYZE-disabled EXPLAIN,
-// neither of which executes the underlying statement. Input must be lowercased
-// and trimmed.
-function getExecutedExplainTarget(normalizedSql: string): string | null {
-  if (!/^explain[\s(]/.test(normalizedSql)) {
-    return null;
-  }
-
-  let rest = normalizedSql.slice("explain".length).trimStart();
-  let analyzeEnabled = false;
-
-  if (rest.startsWith("(")) {
-    // Parenthesized options: EXPLAIN (ANALYZE, BUFFERS) <statement>
-    let depth = 0;
-    let end = -1;
-    for (let i = 0; i < rest.length; i++) {
-      const char = rest[i];
-      if (char === "(") {
-        depth += 1;
-      } else if (char === ")") {
-        depth -= 1;
-        if (depth === 0) {
-          end = i;
-          break;
-        }
-      }
-    }
-    if (end === -1) {
-      return null; // Unbalanced parentheses; let the denylist handle it.
-    }
-    analyzeEnabled = isAnalyzeOptionEnabled(rest.slice(1, end));
-    rest = rest.slice(end + 1).trimStart();
-  } else {
-    // Legacy options: EXPLAIN [ANALYZE] [VERBOSE] <statement>
-    let match: RegExpMatchArray | null = rest.match(
-      /^(analyze|analyse|verbose)\b\s*/
-    );
-    while (match !== null) {
-      if (match[1] !== "verbose") {
-        analyzeEnabled = true;
-      }
-      rest = rest.slice(match[0].length);
-      match = rest.match(/^(analyze|analyse|verbose)\b\s*/);
-    }
-  }
-
-  return analyzeEnabled ? rest : null;
+  assertHostAllowed(config);
+  return config;
 }
 
 class PostgreSQLServer {
@@ -258,7 +164,7 @@ class PostgreSQLServer {
         {
           name: "connect",
           description:
-            "Connect to a PostgreSQL database using a connection string. The connection persists for subsequent queries until changed or disconnected.",
+            "Connect to a PostgreSQL database using a connection string. The connection persists for subsequent queries until changed or disconnected. Only hosts listed in DB_ALLOWED_HOSTS (plus the default DB_HOST:DB_PORT) are permitted.",
           inputSchema: {
             type: "object",
             properties: {
@@ -332,8 +238,7 @@ class PostgreSQLServer {
       const config = parseConnectionString(connectionString);
 
       // Test the connection
-      const client = new Client(config);
-      await client.connect();
+      const client = await this.createClient(config);
       await client.end();
 
       // Store as active connection
@@ -399,12 +304,12 @@ class PostgreSQLServer {
   private async handleQuery(args: QueryToolArguments): Promise<ToolResult> {
     const { sql, connectionString } = args;
 
-    if (!this.isReadOnlyQuery(sql)) {
+    if (!isReadOnlyQuery(sql)) {
       return {
         content: [
           {
             type: "text",
-            text: "Error: Only SELECT queries are allowed for security reasons.",
+            text: "Error: Only read-only queries are allowed for security reasons.",
           },
         ],
         isError: true,
@@ -417,7 +322,17 @@ class PostgreSQLServer {
         ? parseConnectionString(connectionString)
         : undefined;
       client = await this.createClient(config);
-      const result: QueryResult = await client.query(sql);
+
+      // The database enforces read-only for the whole statement, including
+      // data-modifying CTEs and writes hidden inside function calls, which
+      // the keyword check above cannot see. Ending the client afterwards
+      // aborts the transaction, so nothing is ever committed.
+      await client.query("BEGIN READ ONLY");
+      const queryConfig: ExtendedQueryConfig = {
+        text: sql,
+        queryMode: "extended",
+      };
+      const result: QueryResult = await client.query(queryConfig);
 
       return {
         content: [
@@ -442,20 +357,6 @@ class PostgreSQLServer {
         await client.end();
       }
     }
-  }
-
-  private isReadOnlyQuery(sql: string): boolean {
-    const normalizedSql = sql.trim().toLowerCase();
-
-    // `EXPLAIN ANALYZE` actually executes the underlying statement, so a
-    // bare prefix check would let `EXPLAIN ANALYZE DELETE ...` through.
-    // Validate the executed inner statement instead of the wrapper.
-    const executedTarget = getExecutedExplainTarget(normalizedSql);
-    if (executedTarget !== null) {
-      return this.isReadOnlyQuery(executedTarget);
-    }
-
-    return !WRITE_OPERATIONS.some((op) => normalizedSql.startsWith(op));
   }
 
   async run(): Promise<void> {

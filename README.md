@@ -9,7 +9,7 @@ A Model Context Protocol (MCP) server that enables Claude Desktop to interact wi
 
 - Execute read-only SQL queries through Claude Desktop or Claude Code
 - **Dynamic database connections** - connect to any PostgreSQL database at runtime
-- Built-in security with query validation (only SELECT statements allowed)
+- Built-in security: statement validation plus database-enforced `READ ONLY` transactions
 - Easy integration with Claude Desktop and Claude Code
 - JSON formatted query results
 - Environment-based default configuration with runtime override support
@@ -267,6 +267,7 @@ If you're using [mise](https://mise.jdx.dev/) for Node.js version management, ma
 | `DB_USERNAME` | PostgreSQL username | `postgres` |
 | `DB_PASSWORD` | PostgreSQL password | (empty) |
 | `DB_SSL` | Enable SSL connection | `false` |
+| `DB_ALLOWED_HOSTS` | Comma-separated `host:port` pairs that runtime connection strings may target, in addition to `DB_HOST:DB_PORT` | (empty) |
 
 ## Tools
 
@@ -274,7 +275,7 @@ This MCP server exposes three tools that Claude can use to interact with Postgre
 
 ### `connect`
 
-Connect to a PostgreSQL database using a connection string. The connection persists for subsequent queries until changed or disconnected.
+Connect to a PostgreSQL database using a connection string. The connection persists for subsequent queries until changed or disconnected. The target must be `DB_HOST:DB_PORT` or listed in `DB_ALLOWED_HOSTS`.
 
 **Parameters:**
 
@@ -444,7 +445,11 @@ Claude will automatically convert your natural language requests into appropriat
 
 ### Read-Only Operations
 
-The server enforces read-only access on **all connections** (both environment-configured and runtime dynamic connections). A query is rejected if it begins with any of the following statement keywords:
+The server enforces read-only access on **all connections** (both environment-configured and runtime dynamic connections) in three layers:
+
+1. **Database-enforced read-only transaction.** Every query runs inside `BEGIN READ ONLY`, and the connection is closed afterwards, so nothing is ever committed. PostgreSQL itself rejects `INSERT`, `UPDATE`, `DELETE`, `MERGE`, DDL, `SELECT INTO`, `nextval()`, large-object writes and any write hidden in a CTE (`WITH x AS (INSERT ...) SELECT ...`) or a function body, regardless of how the statement is spelled.
+2. **Single statement per query.** Queries are sent with the extended query protocol, which PostgreSQL restricts to one statement, so `SELECT 1; DROP TABLE ...` is rejected by the server.
+3. **Statement validation before execution.** Leading comments are stripped, then a query is rejected if it begins with any of the following statement keywords:
 
 - **Data manipulation** - `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE`, `COPY`, `MERGE`
 - **Schema / DDL** - `CREATE`, `ALTER`, `DROP`, `COMMENT`, `RENAME`, `REASSIGN`
@@ -456,12 +461,17 @@ The server enforces read-only access on **all connections** (both environment-co
 - **Maintenance** - `VACUUM`, `ANALYZE`, `REINDEX`, `CLUSTER`, `REFRESH`, `CHECKPOINT`
 - **Async notification** - `NOTIFY`, `LISTEN`, `UNLISTEN`
 
-Only statements beginning with read verbs (e.g. `SELECT`, `WITH`, `EXPLAIN`, `SHOW`, `TABLE`, `VALUES`) are allowed through. Because `EXPLAIN ANALYZE` executes the statement it wraps, its inner statement is validated too — `EXPLAIN ANALYZE DELETE ...` is rejected, while `EXPLAIN ANALYZE SELECT ...` is allowed.
+Only statements beginning with read verbs (e.g. `SELECT`, `WITH`, `EXPLAIN`, `SHOW`, `TABLE`, `VALUES`) are allowed through. Because `EXPLAIN ANALYZE` executes the statement it wraps, its inner statement is validated too.
+
+A read-only transaction does not stop functions that touch the server filesystem, run arbitrary SQL, or change process state, so a query is also rejected if it mentions any of these anywhere in its text: `pg_read_file`, `pg_read_binary_file`, `pg_stat_file`, `pg_ls_*`, `pg_file_*`, `pg_logdir_ls`, `pg_logfile_rotate`, `lo_import`, `lo_export`, `dblink*`, `query_to_xml*`, `crosstab*`, `connectby`, `set_config`, `pg_terminate_backend`, `pg_cancel_backend`, `pg_reload_conf`, `pg_rotate_logfile`, `pg_sleep*`. Unicode-escaped identifiers (`U&"..."`) are rejected because they could spell one of these names another way.
+
+Function-name matching is a denylist and cannot be complete. The dedicated read-only role below removes the underlying privileges (`pg_write_server_files`, `pg_read_server_files`, superuser) that file operations need, and is the recommended setup.
 
 ### Dynamic Connection Security
 
 When using the `connect` tool or `connectionString` parameter:
 
+- **Host allowlist** - Runtime connection strings may only target `DB_HOST:DB_PORT` or a `host:port` pair listed in `DB_ALLOWED_HOSTS`. Other targets are rejected before any socket is opened, so the tools cannot be used to scan ports on the host or its network.
 - **Read-only enforcement still applies** - All queries are validated regardless of connection source
 - **Credentials are not logged** - Connection strings with passwords are never written to logs
 - **Sanitized responses** - The `connect` tool response excludes passwords

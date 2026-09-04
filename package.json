@@ -23,7 +23,8 @@
     "format": "prettier --write \"src/**/*.{ts,json,md}\"",
     "format:check": "prettier --check \"src/**/*.{ts,json,md}\"",
     "type-check": "tsc --noEmit",
-    "validate": "npm run type-check && npm run lint && npm run format:check",
+    "validate": "npm run type-check && npm run lint && npm run format:check && npm test",
+    "test": "npm run build && node dist/readOnly.test.js",
     "prepublishOnly": "npm run validate && npm run build"
   },
   "keywords": [
